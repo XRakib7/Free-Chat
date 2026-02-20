@@ -1,8 +1,12 @@
 package com.softcraft.freechat.activities;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
 import android.net.Uri;
 import android.os.Bundle;
+import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
@@ -17,6 +21,8 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.app.ActivityCompat;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -24,13 +30,13 @@ import com.bumptech.glide.Glide;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.firestore.FirebaseFirestore;
 import com.google.firebase.firestore.ListenerRegistration;
-
 import com.softcraft.freechat.R;
 import com.softcraft.freechat.adapters.MessageAdapter;
 import com.softcraft.freechat.managers.PresenceManager;
 import com.softcraft.freechat.managers.TypingManager;
 import com.softcraft.freechat.models.Message;
 import com.softcraft.freechat.repositories.ChatRepository;
+import com.softcraft.freechat.utils.ImageUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -43,6 +49,8 @@ public class ChatActivity extends AppCompatActivity implements
         ChatRepository.OnChatCreatedListener {
 
     private static final int REQUEST_IMAGE_PICK = 101;
+    private static final int REQUEST_IMAGE_CAPTURE = 102;
+    private static final int REQUEST_CAMERA_PERMISSION = 103;
 
     private Toolbar toolbar;
     private ImageView imageViewOtherUser;
@@ -114,9 +122,6 @@ public class ChatActivity extends AppCompatActivity implements
         // Setup message status tracking
         setupMessageStatusUpdates();
 
-        // Initialize storage
-        initStorage();
-
         // If chatId is null, create or get existing chat
         if (chatId == null || chatId.isEmpty()) {
             isNewChat = true;
@@ -134,6 +139,7 @@ public class ChatActivity extends AppCompatActivity implements
         recyclerViewMessages = findViewById(R.id.recyclerViewMessages);
         editTextMessage = findViewById(R.id.editTextMessage);
         buttonSend = findViewById(R.id.buttonSend);
+        buttonAttach = findViewById(R.id.buttonAttach);
         progressBar = findViewById(R.id.progressBar);
 
         // Set other user info
@@ -170,6 +176,7 @@ public class ChatActivity extends AppCompatActivity implements
 
     private void setupClickListeners() {
         buttonSend.setOnClickListener(v -> sendMessage());
+        buttonAttach.setOnClickListener(v -> showImagePickerDialog());
     }
 
     private void setupMessageInput() {
@@ -237,20 +244,11 @@ public class ChatActivity extends AppCompatActivity implements
                         textViewOnlineStatus.setTextColor(getColor(R.color.primary));
                     } else {
                         // Reset to online status
-                        if (presenceListener != null) {
-                            setupPresenceListener();
-                        } else {
-                            textViewOnlineStatus.setText("Offline");
-                            textViewOnlineStatus.setTextColor(getColor(R.color.gray));
-                        }
+                        setupPresenceListener();
                     }
                 });
             });
         }
-    }
-
-    private void initStorage() {
-        // Storage already initialized
     }
 
     private void createOrGetChat() {
@@ -289,8 +287,144 @@ public class ChatActivity extends AppCompatActivity implements
         // Clear input
         editTextMessage.setText("");
 
-        // Send message - now passing otherUserName
+        // Send message
         chatRepository.sendMessage(chatId, messageText, otherUserName, this);
+    }
+
+    private void showImagePickerDialog() {
+        String[] options = {"Take Photo", "Choose from Gallery", "Cancel"};
+
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("Send Image")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        // Take photo with camera - ALWAYS check permission before opening
+                        checkCameraPermissionAndOpen();
+                    } else if (which == 1) {
+                        // Choose from gallery (no permission needed for gallery on most devices)
+                        openGallery();
+                    }
+                })
+                .show();
+    }
+
+    private void checkCameraPermissionAndOpen() {
+        // Check if we have camera permission
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED) {
+            // Permission already granted - open camera
+            openCamera();
+        } else {
+            // Permission not granted - request it
+            // Should show a rationale? (Optional but good UX)
+            if (ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.CAMERA)) {
+                // Show explanation to user
+                new androidx.appcompat.app.AlertDialog.Builder(this)
+                        .setTitle("Camera Permission Needed")
+                        .setMessage("This app needs camera permission to take photos and share them in chats.")
+                        .setPositiveButton("OK", (dialog, which) -> {
+                            // Request permission
+                            ActivityCompat.requestPermissions(this,
+                                    new String[]{Manifest.permission.CAMERA},
+                                    REQUEST_CAMERA_PERMISSION);
+                        })
+                        .setNegativeButton("Cancel", null)
+                        .show();
+            } else {
+                // Request permission directly
+                ActivityCompat.requestPermissions(this,
+                        new String[]{Manifest.permission.CAMERA},
+                        REQUEST_CAMERA_PERMISSION);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions,
+                                           @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+
+        if (requestCode == REQUEST_CAMERA_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // Permission granted - open camera
+                Toast.makeText(this, "Camera permission granted", Toast.LENGTH_SHORT).show();
+                openCamera();
+            } else {
+                // Permission denied
+                Toast.makeText(this, "Camera permission is needed to take photos",
+                        Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void openCamera() {
+        Intent intent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (intent.resolveActivity(getPackageManager()) != null) {
+            startActivityForResult(intent, REQUEST_IMAGE_CAPTURE);
+        } else {
+            Toast.makeText(this, "No camera app available", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void openGallery() {
+        Intent intent = new Intent(Intent.ACTION_PICK, MediaStore.Images.Media.EXTERNAL_CONTENT_URI);
+        intent.setType("image/*");
+        startActivityForResult(intent, REQUEST_IMAGE_PICK);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (resultCode == RESULT_OK) {
+            if (requestCode == REQUEST_IMAGE_PICK && data != null) {
+                // Image picked from gallery
+                Uri imageUri = data.getData();
+                try {
+                    Bitmap bitmap = MediaStore.Images.Media.getBitmap(getContentResolver(), imageUri);
+                    sendImageMessage(bitmap);
+                } catch (Exception e) {
+                    Log.e("ChatActivity", "Error loading image from gallery", e);
+                    Toast.makeText(this, "Failed to load image", Toast.LENGTH_SHORT).show();
+                }
+            } else if (requestCode == REQUEST_IMAGE_CAPTURE && data != null) {
+                // Image captured from camera
+                Bundle extras = data.getExtras();
+                Bitmap bitmap = (Bitmap) extras.get("data");
+                if (bitmap != null) {
+                    sendImageMessage(bitmap);
+                }
+            }
+        }
+    }
+
+    private void sendImageMessage(Bitmap bitmap) {
+        if (chatId == null) {
+            Toast.makeText(this, "Chat not ready yet", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        // Show loading
+        progressBar.setVisibility(View.VISIBLE);
+        buttonSend.setEnabled(false);
+        buttonAttach.setEnabled(false);
+
+        // Send image message
+        chatRepository.sendImageMessage(chatId, bitmap, otherUserName, new ChatRepository.OnMessageSentListener() {
+            @Override
+            public void onMessageSent(boolean success, String error) {
+                runOnUiThread(() -> {
+                    progressBar.setVisibility(View.GONE);
+                    buttonSend.setEnabled(true);
+                    buttonAttach.setEnabled(true);
+
+                    if (!success) {
+                        Toast.makeText(ChatActivity.this,
+                                "Failed to send image: " + error, Toast.LENGTH_SHORT).show();
+                    }
+                });
+            }
+        });
     }
 
     private void setupMessageStatusUpdates() {
@@ -361,96 +495,65 @@ public class ChatActivity extends AppCompatActivity implements
         });
     }
 
-    private void updateChatLastMessage(String lastMessage) {
-        Map<String, Object> updates = new HashMap<>();
-        updates.put("lastMessage", lastMessage);
-        updates.put("lastMessageTime", System.currentTimeMillis());
-        updates.put("lastMessageSenderId", FirebaseAuth.getInstance().getCurrentUser().getUid());
-
-        FirebaseFirestore.getInstance()
-                .collection("chats")
-                .document(chatId)
-                .update(updates);
-    }
-
-    private String getLastSeenText(long lastSeen) {
-        long now = System.currentTimeMillis();
-        long diff = now - lastSeen;
-
-        if (diff < 60000) {
-            return "Last seen just now";
-        } else if (diff < 3600000) {
-            int minutes = (int) (diff / 60000);
-            return "Last seen " + minutes + " minute" + (minutes > 1 ? "s" : "") + " ago";
-        } else if (diff < 86400000) {
-            int hours = (int) (diff / 3600000);
-            return "Last seen " + hours + " hour" + (hours > 1 ? "s" : "") + " ago";
-        } else {
-            int days = (int) (diff / 86400000);
-            return "Last seen " + days + " day" + (days > 1 ? "s" : "") + " ago";
-        }
-    }
-
     @Override
     public void onMessagesLoaded(List<Message> messages) {
-        showLoading(false);
+        runOnUiThread(() -> {
+            showLoading(false);
 
-        this.messageList.clear();
-        this.messageList.addAll(messages);
+            this.messageList.clear();
+            this.messageList.addAll(messages);
 
-        messageAdapter.notifyDataSetChanged();
+            messageAdapter.notifyDataSetChanged();
 
-        if (!messageList.isEmpty()) {
-            recyclerViewMessages.scrollToPosition(messageList.size() - 1);
+            if (!messageList.isEmpty()) {
+                recyclerViewMessages.scrollToPosition(messageList.size() - 1);
 
-            // Mark messages as read
-            markMessagesAsRead(messages);
-        }
+                // Mark messages as read
+                markMessagesAsRead(messages);
+            }
+        });
     }
 
     @Override
     public void onError(String error) {
-        showLoading(false);
-        if (error != null && !error.isEmpty()) {
-            Toast.makeText(this, "Error: " + error, Toast.LENGTH_SHORT).show();
-        }
+        runOnUiThread(() -> {
+            showLoading(false);
+            if (error != null && !error.isEmpty()) {
+                Toast.makeText(this, "Error: " + error, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     @Override
     public void onMessageSent(boolean success, String error) {
-        buttonSend.setEnabled(true);
+        runOnUiThread(() -> {
+            buttonSend.setEnabled(true);
 
-        if (!success && error != null) {
-            Toast.makeText(this, "Failed to send message: " + error, Toast.LENGTH_SHORT).show();
-        }
+            if (!success && error != null) {
+                Toast.makeText(this, "Failed to send message: " + error, Toast.LENGTH_SHORT).show();
+            }
+        });
     }
 
     @Override
     public void onChatCreated(String newChatId) {
-        this.chatId = newChatId;
-        isNewChat = false;
+        runOnUiThread(() -> {
+            this.chatId = newChatId;
+            isNewChat = false;
 
-        // Initialize typing manager with new chatId
-        initTypingManager();
+            // Initialize typing manager with new chatId
+            initTypingManager();
 
-        // Load messages (will be empty for new chat)
-        loadMessages();
+            // Load messages (will be empty for new chat)
+            loadMessages();
 
-        showLoading(false);
+            showLoading(false);
 
-        // Also setup presence listener if not already done
-        if (presenceListener == null) {
-            setupPresenceListener();
-        }
-    }
-
-    @Override
-    protected void onActivityResult(int requestCode, int resultCode, @Nullable Intent data) {
-        super.onActivityResult(requestCode, resultCode, data);
-
-        if (requestCode == REQUEST_IMAGE_PICK && resultCode == RESULT_OK && data != null) {
-            Uri imageUri = data.getData();
-        }
+            // Also setup presence listener if not already done
+            if (presenceListener == null) {
+                setupPresenceListener();
+            }
+        });
     }
 
     @Override

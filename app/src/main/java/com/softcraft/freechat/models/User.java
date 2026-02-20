@@ -49,15 +49,11 @@ public class User {
     public long getTokenUpdatedAt() { return tokenUpdatedAt; }
     public void setTokenUpdatedAt(long tokenUpdatedAt) { this.tokenUpdatedAt = tokenUpdatedAt; }
 
-    public void setOnline(boolean isOnline) {
-        this.status = isOnline ? "online" : "offline";
-        this.lastSeen = System.currentTimeMillis();
-    }
-
     public boolean isOnline() {
         return "online".equals(status);
     }
 
+    // This is a helper method, not a field - don't use @PropertyName annotation
     public String getLastSeenText() {
         if (status != null && status.equals("online")) {
             return "Online";
@@ -66,12 +62,12 @@ public class User {
         long now = System.currentTimeMillis();
         long diff = now - lastSeen;
 
-        if (diff < 60000) { // Less than 1 minute
+        if (diff < 60000) {
             return "Last seen just now";
-        } else if (diff < 3600000) { // Less than 1 hour
+        } else if (diff < 3600000) {
             int minutes = (int) (diff / 60000);
             return "Last seen " + minutes + " minute" + (minutes > 1 ? "s" : "") + " ago";
-        } else if (diff < 86400000) { // Less than 24 hours
+        } else if (diff < 86400000) {
             int hours = (int) (diff / 3600000);
             return "Last seen " + hours + " hour" + (hours > 1 ? "s" : "") + " ago";
         } else {

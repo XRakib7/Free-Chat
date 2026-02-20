@@ -1,5 +1,6 @@
 package com.softcraft.freechat.repositories;
 
+import android.graphics.Bitmap;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -18,6 +19,7 @@ import com.google.firebase.firestore.QuerySnapshot;
 import com.softcraft.freechat.models.Chat;
 import com.softcraft.freechat.models.Message;
 import com.softcraft.freechat.models.User;
+import com.softcraft.freechat.utils.ImageUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -207,6 +209,87 @@ public class ChatRepository {
                     listener.onMessageSent(false, "Failed to get user info: " + e.getMessage());
                 });
     }
+
+    public void sendImageMessage(String chatId, Bitmap imageBitmap, String otherUserName, final OnMessageSentListener listener) {
+        if (chatId == null || chatId.isEmpty()) {
+            listener.onMessageSent(false, "Chat ID is invalid");
+            return;
+        }
+
+        String currentUserId = auth.getCurrentUser().getUid();
+
+        // Get current user's name from Firestore
+        db.collection("users").document(currentUserId).get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    User currentUser = documentSnapshot.toObject(User.class);
+                    String currentUserName = currentUser != null && currentUser.getName() != null
+                            ? currentUser.getName() : "User";
+
+                    // Compress and resize image
+                    Bitmap compressedImage = ImageUtils.compressImage(
+                            imageBitmap,
+                            1024, // Max dimension
+                            400 * 1024 // 400KB max (leaving room for metadata)
+                    );
+
+                    // Convert to Base64
+                    String imageBase64 = ImageUtils.bitmapToBase64(compressedImage);
+
+                    if (imageBase64 == null) {
+                        listener.onMessageSent(false, "Failed to process image");
+                        return;
+                    }
+
+                    // Create message object
+                    Message message = new Message(null, currentUserId, currentUserName, imageBase64, true);
+                    message.setStatus("sending");
+
+                    // Add read status for sender
+                    Map<String, Boolean> readBy = new HashMap<>();
+                    readBy.put(currentUserId, true);
+                    message.setReadBy(readBy);
+
+                    // Add delivered status for sender
+                    Map<String, Boolean> deliveredTo = new HashMap<>();
+                    deliveredTo.put(currentUserId, true);
+                    message.setDeliveredTo(deliveredTo);
+
+                    // Save message to Firestore
+                    db.collection("chats").document(chatId)
+                            .collection("messages")
+                            .add(message)
+                            .addOnCompleteListener(new OnCompleteListener<DocumentReference>() {
+                                @Override
+                                public void onComplete(@NonNull Task<DocumentReference> task) {
+                                    if (task.isSuccessful()) {
+                                        String messageId = task.getResult().getId();
+
+                                        // Update message status to sent
+                                        Map<String, Object> statusUpdate = new HashMap<>();
+                                        statusUpdate.put("status", "sent");
+
+                                        db.collection("chats").document(chatId)
+                                                .collection("messages")
+                                                .document(messageId)
+                                                .update(statusUpdate);
+
+                                        // Update last message in chat document
+                                        updateChatLastMessage(chatId, "📷 Image");
+
+                                        listener.onMessageSent(true, null);
+                                    } else {
+                                        listener.onMessageSent(false, task.getException() != null ?
+                                                task.getException().getMessage() : "Unknown error");
+                                    }
+                                }
+                            });
+                })
+                .addOnFailureListener(e -> {
+                    listener.onMessageSent(false, "Failed to get user info: " + e.getMessage());
+                });
+    }
+
+
 
     // Update chat's last message
     private void updateChatLastMessage(String chatId, String lastMessage) {

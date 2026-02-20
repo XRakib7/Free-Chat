@@ -9,15 +9,17 @@ public class Message {
     private String senderName;
     private String text;
     private long timestamp;
-    private String messageType; // "text", "image" (for future)
-    private Map<String, Boolean> readBy; // Track who read the message
-    private Map<String, Boolean> deliveredTo; // Track who received the message
+    private String messageType; // "text", "image"
+    private String imageBase64; // Base64 encoded image (for free plan)
+    private Map<String, Boolean> readBy;
+    private Map<String, Boolean> deliveredTo;
     private String status; // "sending", "sent", "delivered", "read"
 
     public Message() {
         // Empty constructor for Firebase
     }
 
+    // Constructor for text message
     public Message(String messageId, String senderId, String senderName, String text) {
         this.messageId = messageId;
         this.senderId = senderId;
@@ -25,6 +27,19 @@ public class Message {
         this.text = text;
         this.timestamp = System.currentTimeMillis();
         this.messageType = "text";
+        this.status = "sending";
+        this.readBy = new HashMap<>();
+        this.deliveredTo = new HashMap<>();
+    }
+
+    // Constructor for image message
+    public Message(String messageId, String senderId, String senderName, String imageBase64, boolean isImage) {
+        this.messageId = messageId;
+        this.senderId = senderId;
+        this.senderName = senderName;
+        this.imageBase64 = imageBase64;
+        this.timestamp = System.currentTimeMillis();
+        this.messageType = "image";
         this.status = "sending";
         this.readBy = new HashMap<>();
         this.deliveredTo = new HashMap<>();
@@ -49,6 +64,9 @@ public class Message {
     public String getMessageType() { return messageType; }
     public void setMessageType(String messageType) { this.messageType = messageType; }
 
+    public String getImageBase64() { return imageBase64; }
+    public void setImageBase64(String imageBase64) { this.imageBase64 = imageBase64; }
+
     public Map<String, Boolean> getReadBy() { return readBy; }
     public void setReadBy(Map<String, Boolean> readBy) { this.readBy = readBy; }
 
@@ -67,14 +85,17 @@ public class Message {
         return deliveredTo != null && deliveredTo.containsKey(userId) && deliveredTo.get(userId);
     }
 
+    public boolean isImage() {
+        return "image".equals(messageType);
+    }
+
     public void markAsRead(String userId) {
         if (readBy == null) {
             readBy = new HashMap<>();
         }
         readBy.put(userId, true);
 
-        // Update status if all participants have read it
-        if (readBy.size() >= 2) { // Assuming private chat has 2 participants
+        if (readBy.size() >= 2) {
             this.status = "read";
         }
     }
@@ -85,7 +106,6 @@ public class Message {
         }
         deliveredTo.put(userId, true);
 
-        // Update status if all participants have received it
         if (deliveredTo.size() >= 2 && "sent".equals(status)) {
             this.status = "delivered";
         }
