@@ -14,7 +14,7 @@ public class Message {
     private Map<String, Boolean> readBy;
     private Map<String, Boolean> deliveredTo;
     private String status; // "sending", "sent", "delivered", "read"
-
+    private boolean encrypted = true;
     public Message() {
         // Empty constructor for Firebase
     }
@@ -30,6 +30,7 @@ public class Message {
         this.status = "sending";
         this.readBy = new HashMap<>();
         this.deliveredTo = new HashMap<>();
+        this.encrypted = true;
     }
 
     // Constructor for image message
@@ -43,6 +44,7 @@ public class Message {
         this.status = "sending";
         this.readBy = new HashMap<>();
         this.deliveredTo = new HashMap<>();
+        this.encrypted = true;
     }
 
     // Getters and Setters
@@ -88,7 +90,8 @@ public class Message {
     public boolean isImage() {
         return "image".equals(messageType);
     }
-
+    public boolean isEncrypted() { return encrypted; }
+    public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
     public void markAsRead(String userId) {
         if (readBy == null) {
             readBy = new HashMap<>();

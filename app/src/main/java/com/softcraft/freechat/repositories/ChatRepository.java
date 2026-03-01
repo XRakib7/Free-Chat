@@ -141,7 +141,8 @@ public class ChatRepository {
     }
 
     // Send a new message with proper status tracking
-    public void sendMessage(String chatId, String text, String otherUserName, final OnMessageSentListener listener) {
+    public void sendMessage(String chatId, String encryptedText, String otherUserName,
+                            final OnMessageSentListener listener) {
         if (chatId == null || chatId.isEmpty()) {
             listener.onMessageSent(false, "Chat ID is invalid");
             return;
@@ -156,52 +157,50 @@ public class ChatRepository {
                     String currentUserName = currentUser != null && currentUser.getName() != null
                             ? currentUser.getName() : "User";
 
-                    // Create message object with proper status
+                    // Create message object with encrypted content
                     Message message = new Message();
                     message.setSenderId(currentUserId);
                     message.setSenderName(currentUserName);
-                    message.setText(text);
+                    message.setText(encryptedText);          // already encrypted
                     message.setTimestamp(System.currentTimeMillis());
                     message.setMessageType("text");
-                    message.setStatus("sending"); // Start with sending status
+                    message.setStatus("sending");
+                    message.setEncrypted(true);               // mark as encrypted
 
-                    // Add read status for sender
+                    // Mark as read by sender
                     Map<String, Boolean> readBy = new HashMap<>();
                     readBy.put(currentUserId, true);
                     message.setReadBy(readBy);
 
-                    // Add delivered status for sender
+                    // Mark as delivered to sender
                     Map<String, Boolean> deliveredTo = new HashMap<>();
                     deliveredTo.put(currentUserId, true);
                     message.setDeliveredTo(deliveredTo);
 
-                    // Save message to Firestore
+                    // Save to Firestore
                     db.collection("chats").document(chatId)
                             .collection("messages")
                             .add(message)
-                            .addOnCompleteListener(new OnCompleteListener<DocumentReference>() {
-                                @Override
-                                public void onComplete(@NonNull Task<DocumentReference> task) {
-                                    if (task.isSuccessful()) {
-                                        String messageId = task.getResult().getId();
+                            .addOnCompleteListener(task -> {
+                                if (task.isSuccessful()) {
+                                    String messageId = task.getResult().getId();
 
-                                        // Update message status to sent
-                                        Map<String, Object> statusUpdate = new HashMap<>();
-                                        statusUpdate.put("status", "sent");
+                                    // Update status to "sent"
+                                    Map<String, Object> statusUpdate = new HashMap<>();
+                                    statusUpdate.put("status", "sent");
+                                    db.collection("chats").document(chatId)
+                                            .collection("messages")
+                                            .document(messageId)
+                                            .update(statusUpdate);
 
-                                        db.collection("chats").document(chatId)
-                                                .collection("messages")
-                                                .document(messageId)
-                                                .update(statusUpdate);
+                                    // Update last message in chat document (generic placeholder)
+                                    updateChatLastMessage(chatId, "text");
 
-                                        // Update last message in chat document
-                                        updateChatLastMessage(chatId, text);
-
-                                        listener.onMessageSent(true, null);
-                                    } else {
-                                        listener.onMessageSent(false, task.getException() != null ?
-                                                task.getException().getMessage() : "Unknown error");
-                                    }
+                                    listener.onMessageSent(true, null);
+                                } else {
+                                    listener.onMessageSent(false,
+                                            task.getException() != null ?
+                                                    task.getException().getMessage() : "Unknown error");
                                 }
                             });
                 })
@@ -210,7 +209,8 @@ public class ChatRepository {
                 });
     }
 
-    public void sendImageMessage(String chatId, Bitmap imageBitmap, String otherUserName, final OnMessageSentListener listener) {
+    public void sendImageMessage(String chatId, String encryptedImageBase64, String otherUserName,
+                                 final OnMessageSentListener listener) {
         if (chatId == null || chatId.isEmpty()) {
             listener.onMessageSent(false, "Chat ID is invalid");
             return;
@@ -218,69 +218,56 @@ public class ChatRepository {
 
         String currentUserId = auth.getCurrentUser().getUid();
 
-        // Get current user's name from Firestore
+        // Get current user's name
         db.collection("users").document(currentUserId).get()
                 .addOnSuccessListener(documentSnapshot -> {
                     User currentUser = documentSnapshot.toObject(User.class);
                     String currentUserName = currentUser != null && currentUser.getName() != null
                             ? currentUser.getName() : "User";
 
-                    // Compress and resize image
-                    Bitmap compressedImage = ImageUtils.compressImage(
-                            imageBitmap,
-                            1024, // Max dimension
-                            400 * 1024 // 400KB max (leaving room for metadata)
-                    );
-
-                    // Convert to Base64
-                    String imageBase64 = ImageUtils.bitmapToBase64(compressedImage);
-
-                    if (imageBase64 == null) {
-                        listener.onMessageSent(false, "Failed to process image");
-                        return;
-                    }
-
-                    // Create message object
-                    Message message = new Message(null, currentUserId, currentUserName, imageBase64, true);
+                    // Create message object with encrypted image
+                    Message message = new Message();
+                    message.setSenderId(currentUserId);
+                    message.setSenderName(currentUserName);
+                    message.setImageBase64(encryptedImageBase64);   // already encrypted
+                    message.setTimestamp(System.currentTimeMillis());
+                    message.setMessageType("image");
                     message.setStatus("sending");
+                    message.setEncrypted(true);
 
-                    // Add read status for sender
+                    // Mark as read/delivered by sender
                     Map<String, Boolean> readBy = new HashMap<>();
                     readBy.put(currentUserId, true);
                     message.setReadBy(readBy);
 
-                    // Add delivered status for sender
                     Map<String, Boolean> deliveredTo = new HashMap<>();
                     deliveredTo.put(currentUserId, true);
                     message.setDeliveredTo(deliveredTo);
 
-                    // Save message to Firestore
+                    // Save to Firestore
                     db.collection("chats").document(chatId)
                             .collection("messages")
                             .add(message)
-                            .addOnCompleteListener(new OnCompleteListener<DocumentReference>() {
-                                @Override
-                                public void onComplete(@NonNull Task<DocumentReference> task) {
-                                    if (task.isSuccessful()) {
-                                        String messageId = task.getResult().getId();
+                            .addOnCompleteListener(task -> {
+                                if (task.isSuccessful()) {
+                                    String messageId = task.getResult().getId();
 
-                                        // Update message status to sent
-                                        Map<String, Object> statusUpdate = new HashMap<>();
-                                        statusUpdate.put("status", "sent");
+                                    // Update status to "sent"
+                                    Map<String, Object> statusUpdate = new HashMap<>();
+                                    statusUpdate.put("status", "sent");
+                                    db.collection("chats").document(chatId)
+                                            .collection("messages")
+                                            .document(messageId)
+                                            .update(statusUpdate);
 
-                                        db.collection("chats").document(chatId)
-                                                .collection("messages")
-                                                .document(messageId)
-                                                .update(statusUpdate);
+                                    // Update last message in chat document (generic placeholder)
+                                    updateChatLastMessage(chatId, "image");
 
-                                        // Update last message in chat document
-                                        updateChatLastMessage(chatId, "📷 Image");
-
-                                        listener.onMessageSent(true, null);
-                                    } else {
-                                        listener.onMessageSent(false, task.getException() != null ?
-                                                task.getException().getMessage() : "Unknown error");
-                                    }
+                                    listener.onMessageSent(true, null);
+                                } else {
+                                    listener.onMessageSent(false,
+                                            task.getException() != null ?
+                                                    task.getException().getMessage() : "Unknown error");
                                 }
                             });
                 })
@@ -288,18 +275,28 @@ public class ChatRepository {
                     listener.onMessageSent(false, "Failed to get user info: " + e.getMessage());
                 });
     }
+
 
 
 
     // Update chat's last message
-    private void updateChatLastMessage(String chatId, String lastMessage) {
+    private void updateChatLastMessage(String chatId, String messageType) {
+        String lastMessagePlaceholder;
+        if ("image".equals(messageType)) {
+            lastMessagePlaceholder = "📷 Image";
+        } else {
+            lastMessagePlaceholder = "💬 New message";
+        }
+
         Map<String, Object> updates = new HashMap<>();
-        updates.put("lastMessage", lastMessage);
+        updates.put("lastMessage", lastMessagePlaceholder);
         updates.put("lastMessageTime", System.currentTimeMillis());
         updates.put("lastMessageSenderId", auth.getCurrentUser().getUid());
 
         db.collection("chats").document(chatId)
-                .update(updates);
+                .update(updates)
+                .addOnFailureListener(e ->
+                        Log.e(TAG, "Failed to update last message", e));
     }
 
     // Mark message as delivered

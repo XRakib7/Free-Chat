@@ -36,12 +36,15 @@ import com.softcraft.freechat.managers.PresenceManager;
 import com.softcraft.freechat.managers.TypingManager;
 import com.softcraft.freechat.models.Message;
 import com.softcraft.freechat.repositories.ChatRepository;
+import com.softcraft.freechat.utils.EncryptionUtils;
 import com.softcraft.freechat.utils.ImageUtils;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+
+import javax.crypto.SecretKey;
 
 public class ChatActivity extends AppCompatActivity implements
         ChatRepository.OnMessagesLoadedListener,
@@ -76,6 +79,7 @@ public class ChatActivity extends AppCompatActivity implements
     private ListenerRegistration presenceListener;
 
     private boolean isUserTyping = false;
+    private SecretKey encryptionKey;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -92,6 +96,8 @@ public class ChatActivity extends AppCompatActivity implements
         if (otherUserName == null || otherUserName.isEmpty()) {
             otherUserName = "User";
         }
+        String currentUserId = FirebaseAuth.getInstance().getCurrentUser().getUid();
+        encryptionKey = EncryptionUtils.generateKey(currentUserId, otherUserId);
 
         // Initialize repositories and managers
         chatRepository = new ChatRepository();
@@ -265,13 +271,14 @@ public class ChatActivity extends AppCompatActivity implements
 
     private void sendMessage() {
         String messageText = editTextMessage.getText().toString().trim();
+        if (TextUtils.isEmpty(messageText)) return;
 
-        if (TextUtils.isEmpty(messageText)) {
-            return;
-        }
-
-        if (chatId == null) {
-            Toast.makeText(this, "Chat not ready yet", Toast.LENGTH_SHORT).show();
+        // Encrypt the message
+        String encryptedText;
+        try {
+            encryptedText = EncryptionUtils.encrypt(messageText, encryptionKey);
+        } catch (Exception e) {
+            Toast.makeText(this, "Encryption failed", Toast.LENGTH_SHORT).show();
             return;
         }
 
@@ -281,16 +288,12 @@ public class ChatActivity extends AppCompatActivity implements
             isUserTyping = false;
         }
 
-        // Disable send button temporarily
         buttonSend.setEnabled(false);
-
-        // Clear input
         editTextMessage.setText("");
 
-        // Send message
-        chatRepository.sendMessage(chatId, messageText, otherUserName, this);
+        // Send encrypted text
+        chatRepository.sendMessage(chatId, encryptedText, otherUserName, this);
     }
-
     private void showImagePickerDialog() {
         String[] options = {"Take Photo", "Choose from Gallery", "Cancel"};
 
@@ -400,31 +403,38 @@ public class ChatActivity extends AppCompatActivity implements
 
     private void sendImageMessage(Bitmap bitmap) {
         if (chatId == null) {
-            Toast.makeText(this, "Chat not ready yet", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Chat not ready", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        // Show loading
         progressBar.setVisibility(View.VISIBLE);
         buttonSend.setEnabled(false);
         buttonAttach.setEnabled(false);
 
-        // Send image message
-        chatRepository.sendImageMessage(chatId, bitmap, otherUserName, new ChatRepository.OnMessageSentListener() {
-            @Override
-            public void onMessageSent(boolean success, String error) {
-                runOnUiThread(() -> {
-                    progressBar.setVisibility(View.GONE);
-                    buttonSend.setEnabled(true);
-                    buttonAttach.setEnabled(true);
+        // Compress and convert to Base64 (as before)
+        Bitmap compressed = ImageUtils.compressImage(bitmap, 1024, 400 * 1024);
+        String imageBase64 = ImageUtils.bitmapToBase64(compressed);
+        if (imageBase64 == null) {
+            Toast.makeText(this, "Image processing failed", Toast.LENGTH_SHORT).show();
+            progressBar.setVisibility(View.GONE);
+            buttonSend.setEnabled(true);
+            buttonAttach.setEnabled(true);
+            return;
+        }
 
-                    if (!success) {
-                        Toast.makeText(ChatActivity.this,
-                                "Failed to send image: " + error, Toast.LENGTH_SHORT).show();
-                    }
-                });
-            }
-        });
+        // Encrypt the Base64 string
+        String encryptedImage;
+        try {
+            encryptedImage = EncryptionUtils.encrypt(imageBase64, encryptionKey);
+        } catch (Exception e) {
+            Toast.makeText(this, "Encryption failed", Toast.LENGTH_SHORT).show();
+            progressBar.setVisibility(View.GONE);
+            buttonSend.setEnabled(true);
+            buttonAttach.setEnabled(true);
+            return;
+        }
+        // Send encrypted image
+        chatRepository.sendImageMessage(chatId, encryptedImage, otherUserName, this);
     }
 
     private void setupMessageStatusUpdates() {
@@ -495,23 +505,41 @@ public class ChatActivity extends AppCompatActivity implements
         });
     }
 
-    @Override
     public void onMessagesLoaded(List<Message> messages) {
         runOnUiThread(() -> {
             showLoading(false);
 
+            // Decrypt each message if it is marked encrypted
+            for (Message msg : messages) {
+                if (msg.isEncrypted()) {
+                    try {
+                        if (msg.getText() != null) {
+                            String decrypted = EncryptionUtils.decrypt(msg.getText(), encryptionKey);
+                            msg.setText(decrypted);
+                        }
+                        if (msg.getImageBase64() != null) {
+                            String decrypted = EncryptionUtils.decrypt(msg.getImageBase64(), encryptionKey);
+                            msg.setImageBase64(decrypted);
+                        }
+                    } catch (Exception e) {
+                        Log.e("ChatActivity", "Decryption failed", e);
+                        // Optionally set a placeholder
+                        if (msg.getText() != null) msg.setText("[Encrypted]");
+                        if (msg.getImageBase64() != null) msg.setImageBase64(null);
+                    }
+                }
+            }
+
             this.messageList.clear();
             this.messageList.addAll(messages);
-
             messageAdapter.notifyDataSetChanged();
 
             if (!messageList.isEmpty()) {
                 recyclerViewMessages.scrollToPosition(messageList.size() - 1);
-
-                // Mark messages as read
                 markMessagesAsRead(messages);
             }
         });
+
     }
 
     @Override
