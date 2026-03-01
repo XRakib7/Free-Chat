@@ -15,6 +15,7 @@ import androidx.appcompat.app.AppCompatActivity;
 import com.softcraft.freechat.R;
 import com.softcraft.freechat.managers.AuthManager;
 import com.softcraft.freechat.models.AuthState;
+import com.softcraft.freechat.utils.NotificationHelper;
 
 public class SignUpActivity extends AppCompatActivity implements AuthManager.AuthListener {
 
@@ -115,7 +116,7 @@ public class SignUpActivity extends AppCompatActivity implements AuthManager.Aut
         buttonSignUp.setEnabled(true);
 
         Toast.makeText(this, "Account created successfully!", Toast.LENGTH_SHORT).show();
-
+        NotificationHelper.updateFCMToken();
         // Go to main activity
         startActivity(new Intent(SignUpActivity.this, MainActivity.class));
         finish();

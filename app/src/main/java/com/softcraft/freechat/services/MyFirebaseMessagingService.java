@@ -1,6 +1,5 @@
 package com.softcraft.freechat.services;
 
-import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
@@ -19,6 +18,7 @@ import com.google.firebase.messaging.RemoteMessage;
 import com.softcraft.freechat.R;
 import com.softcraft.freechat.activities.ChatActivity;
 import com.softcraft.freechat.activities.MainActivity;
+import com.softcraft.freechat.utils.NotificationHelper;
 
 import java.util.Map;
 
@@ -30,51 +30,42 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
     @Override
     public void onMessageReceived(@NonNull RemoteMessage remoteMessage) {
         super.onMessageReceived(remoteMessage);
-
         Log.d(TAG, "From: " + remoteMessage.getFrom());
 
-        // Check if message contains a data payload
         if (remoteMessage.getData().size() > 0) {
-            Log.d(TAG, "Message data payload: " + remoteMessage.getData());
+            Log.d(TAG, "Data payload: " + remoteMessage.getData());
             sendNotification(remoteMessage.getData());
-        }
-
-        // Check if message contains a notification payload
-        if (remoteMessage.getNotification() != null) {
-            Log.d(TAG, "Message Notification Body: " + remoteMessage.getNotification().getBody());
         }
     }
 
     @Override
     public void onNewToken(@NonNull String token) {
-        Log.d(TAG, "Refreshed token: " + token);
-        sendRegistrationToServer(token);
-    }
-
-    private void sendRegistrationToServer(String token) {
-        // Send token to your server (Firestore)
-        // You can update the user's FCM token in Firestore here
+        Log.d(TAG, "New FCM token: " + token);
+        // Update token in Firestore
+        NotificationHelper.updateFCMToken();
     }
 
     private void sendNotification(Map<String, String> data) {
         String title = data.get("title");
-        String message = data.get("body");
+        String body = data.get("body");
         String chatId = data.get("chatId");
         String senderId = data.get("senderId");
+        String senderName = data.get("senderName");
 
         if (title == null) title = "New Message";
-        if (message == null) message = "You have a new message";
+        if (body == null) body = "You have a new message";
 
         Intent intent;
-        if (chatId != null) {
+        if (chatId != null && !chatId.isEmpty()) {
             intent = new Intent(this, ChatActivity.class);
             intent.putExtra("chatId", chatId);
             intent.putExtra("otherUserId", senderId);
+            intent.putExtra("otherUserName", senderName != null ? senderName : "User");
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         } else {
             intent = new Intent(this, MainActivity.class);
+            intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         }
-
-        intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
 
         PendingIntent pendingIntent = PendingIntent.getActivity(
                 this,
@@ -89,16 +80,19 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
                 new NotificationCompat.Builder(this, CHANNEL_ID)
                         .setSmallIcon(R.drawable.ic_notification)
                         .setContentTitle(title)
-                        .setContentText(message)
+                        .setContentText(body)
                         .setAutoCancel(true)
                         .setSound(defaultSoundUri)
                         .setContentIntent(pendingIntent)
                         .setPriority(NotificationCompat.PRIORITY_HIGH);
 
+        if (body != null && body.length() > 40) {
+            notificationBuilder.setStyle(new NotificationCompat.BigTextStyle().bigText(body));
+        }
+
         NotificationManager notificationManager =
                 (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
 
-        // Create notification channel for Android O and above
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                     CHANNEL_ID,
@@ -107,11 +101,13 @@ public class MyFirebaseMessagingService extends FirebaseMessagingService {
             );
             channel.setDescription("New message notifications");
             channel.enableLights(true);
-            channel.setLightColor(R.color.primary);
+            channel.setLightColor(getResources().getColor(R.color.primary));
             channel.enableVibration(true);
+            channel.setVibrationPattern(new long[]{0, 500, 200, 500});
             notificationManager.createNotificationChannel(channel);
         }
 
-        notificationManager.notify(0, notificationBuilder.build());
+        int notificationId = chatId != null ? chatId.hashCode() : 0;
+        notificationManager.notify(notificationId, notificationBuilder.build());
     }
 }

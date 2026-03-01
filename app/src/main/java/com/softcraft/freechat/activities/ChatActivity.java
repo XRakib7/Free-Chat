@@ -127,6 +127,7 @@ public class ChatActivity extends AppCompatActivity implements
 
         // Setup message status tracking
         setupMessageStatusUpdates();
+        handleNotificationIntent();
 
         // If chatId is null, create or get existing chat
         if (chatId == null || chatId.isEmpty()) {
@@ -540,6 +541,16 @@ public class ChatActivity extends AppCompatActivity implements
             }
         });
 
+    }
+    private void handleNotificationIntent() {
+        Intent intent = getIntent();
+        if (intent != null) {
+            String chatId = intent.getStringExtra("chatId");
+            String otherUserId = intent.getStringExtra("otherUserId");
+
+            // If this activity was opened from a notification, we're already in the right chat
+            // No need to do anything extra
+        }
     }
 
     @Override

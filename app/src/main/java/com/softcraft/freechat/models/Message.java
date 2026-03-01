@@ -28,9 +28,10 @@ public class Message {
         this.timestamp = System.currentTimeMillis();
         this.messageType = "text";
         this.status = "sending";
+        this.encrypted = true;
         this.readBy = new HashMap<>();
         this.deliveredTo = new HashMap<>();
-        this.encrypted = true;
+
     }
 
     // Constructor for image message
@@ -42,9 +43,10 @@ public class Message {
         this.timestamp = System.currentTimeMillis();
         this.messageType = "image";
         this.status = "sending";
+        this.encrypted = true;
         this.readBy = new HashMap<>();
         this.deliveredTo = new HashMap<>();
-        this.encrypted = true;
+
     }
 
     // Getters and Setters

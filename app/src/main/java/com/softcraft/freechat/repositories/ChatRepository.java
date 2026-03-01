@@ -20,6 +20,10 @@ import com.softcraft.freechat.models.Chat;
 import com.softcraft.freechat.models.Message;
 import com.softcraft.freechat.models.User;
 import com.softcraft.freechat.utils.ImageUtils;
+import com.softcraft.freechat.utils.NotificationServerHelper;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -141,144 +145,91 @@ public class ChatRepository {
     }
 
     // Send a new message with proper status tracking
-    public void sendMessage(String chatId, String encryptedText, String otherUserName,
-                            final OnMessageSentListener listener) {
-        if (chatId == null || chatId.isEmpty()) {
-            listener.onMessageSent(false, "Chat ID is invalid");
-            return;
-        }
+    public void sendMessage(String chatId, String encryptedText, String senderName, OnMessageSentListener listener) {
+        String currentUserId = FirebaseAuth.getInstance().getCurrentUser().getUid();
+        String messageId = db.collection("chats").document(chatId).collection("messages").document().getId();
 
-        String currentUserId = auth.getCurrentUser().getUid();
+        Message message = new Message(messageId, currentUserId, senderName, encryptedText);
 
-        // Get current user's name from Firestore
-        db.collection("users").document(currentUserId).get()
-                .addOnSuccessListener(documentSnapshot -> {
-                    User currentUser = documentSnapshot.toObject(User.class);
-                    String currentUserName = currentUser != null && currentUser.getName() != null
-                            ? currentUser.getName() : "User";
+        db.collection("chats")
+                .document(chatId)
+                .collection("messages")
+                .document(messageId)
+                .set(message)
+                .addOnSuccessListener(aVoid -> {
+                    // Update chat last message
+                    Map<String, Object> updates = new HashMap<>();
+                    updates.put("lastMessage", encryptedText.length() > 30 ? encryptedText.substring(0,30)+"..." : encryptedText);
+                    updates.put("lastMessageTime", System.currentTimeMillis());
+                    updates.put("lastMessageSenderId", currentUserId);
 
-                    // Create message object with encrypted content
-                    Message message = new Message();
-                    message.setSenderId(currentUserId);
-                    message.setSenderName(currentUserName);
-                    message.setText(encryptedText);          // already encrypted
-                    message.setTimestamp(System.currentTimeMillis());
-                    message.setMessageType("text");
-                    message.setStatus("sending");
-                    message.setEncrypted(true);               // mark as encrypted
+                    db.collection("chats").document(chatId).update(updates);
 
-                    // Mark as read by sender
-                    Map<String, Boolean> readBy = new HashMap<>();
-                    readBy.put(currentUserId, true);
-                    message.setReadBy(readBy);
+                    // Send push notification (use "New message" because we don't have plain text here)
+                    sendPushNotification(chatId, "New message", senderName, false);
 
-                    // Mark as delivered to sender
-                    Map<String, Boolean> deliveredTo = new HashMap<>();
-                    deliveredTo.put(currentUserId, true);
-                    message.setDeliveredTo(deliveredTo);
-
-                    // Save to Firestore
-                    db.collection("chats").document(chatId)
-                            .collection("messages")
-                            .add(message)
-                            .addOnCompleteListener(task -> {
-                                if (task.isSuccessful()) {
-                                    String messageId = task.getResult().getId();
-
-                                    // Update status to "sent"
-                                    Map<String, Object> statusUpdate = new HashMap<>();
-                                    statusUpdate.put("status", "sent");
-                                    db.collection("chats").document(chatId)
-                                            .collection("messages")
-                                            .document(messageId)
-                                            .update(statusUpdate);
-
-                                    // Update last message in chat document (generic placeholder)
-                                    updateChatLastMessage(chatId, "text");
-
-                                    listener.onMessageSent(true, null);
-                                } else {
-                                    listener.onMessageSent(false,
-                                            task.getException() != null ?
-                                                    task.getException().getMessage() : "Unknown error");
-                                }
-                            });
+                    if (listener != null) listener.onMessageSent(true, null);
                 })
                 .addOnFailureListener(e -> {
-                    listener.onMessageSent(false, "Failed to get user info: " + e.getMessage());
+                    Log.e(TAG, "Error sending message", e);
+                    if (listener != null) listener.onMessageSent(false, e.getMessage());
                 });
     }
 
-    public void sendImageMessage(String chatId, String encryptedImageBase64, String otherUserName,
-                                 final OnMessageSentListener listener) {
-        if (chatId == null || chatId.isEmpty()) {
-            listener.onMessageSent(false, "Chat ID is invalid");
-            return;
-        }
+    public void sendImageMessage(String chatId, String encryptedImage, String senderName, OnMessageSentListener listener) {
+        String currentUserId = FirebaseAuth.getInstance().getCurrentUser().getUid();
+        String messageId = db.collection("chats").document(chatId).collection("messages").document().getId();
 
-        String currentUserId = auth.getCurrentUser().getUid();
+        Message message = new Message(messageId, currentUserId, senderName, encryptedImage, true);
 
-        // Get current user's name
-        db.collection("users").document(currentUserId).get()
-                .addOnSuccessListener(documentSnapshot -> {
-                    User currentUser = documentSnapshot.toObject(User.class);
-                    String currentUserName = currentUser != null && currentUser.getName() != null
-                            ? currentUser.getName() : "User";
+        db.collection("chats")
+                .document(chatId)
+                .collection("messages")
+                .document(messageId)
+                .set(message)
+                .addOnSuccessListener(aVoid -> {
+                    Map<String, Object> updates = new HashMap<>();
+                    updates.put("lastMessage", "📷 Image");
+                    updates.put("lastMessageTime", System.currentTimeMillis());
+                    updates.put("lastMessageSenderId", currentUserId);
 
-                    // Create message object with encrypted image
-                    Message message = new Message();
-                    message.setSenderId(currentUserId);
-                    message.setSenderName(currentUserName);
-                    message.setImageBase64(encryptedImageBase64);   // already encrypted
-                    message.setTimestamp(System.currentTimeMillis());
-                    message.setMessageType("image");
-                    message.setStatus("sending");
-                    message.setEncrypted(true);
+                    db.collection("chats").document(chatId).update(updates);
 
-                    // Mark as read/delivered by sender
-                    Map<String, Boolean> readBy = new HashMap<>();
-                    readBy.put(currentUserId, true);
-                    message.setReadBy(readBy);
+                    sendPushNotification(chatId, "📷 Image", senderName, true);
 
-                    Map<String, Boolean> deliveredTo = new HashMap<>();
-                    deliveredTo.put(currentUserId, true);
-                    message.setDeliveredTo(deliveredTo);
-
-                    // Save to Firestore
-                    db.collection("chats").document(chatId)
-                            .collection("messages")
-                            .add(message)
-                            .addOnCompleteListener(task -> {
-                                if (task.isSuccessful()) {
-                                    String messageId = task.getResult().getId();
-
-                                    // Update status to "sent"
-                                    Map<String, Object> statusUpdate = new HashMap<>();
-                                    statusUpdate.put("status", "sent");
-                                    db.collection("chats").document(chatId)
-                                            .collection("messages")
-                                            .document(messageId)
-                                            .update(statusUpdate);
-
-                                    // Update last message in chat document (generic placeholder)
-                                    updateChatLastMessage(chatId, "image");
-
-                                    listener.onMessageSent(true, null);
-                                } else {
-                                    listener.onMessageSent(false,
-                                            task.getException() != null ?
-                                                    task.getException().getMessage() : "Unknown error");
-                                }
-                            });
+                    if (listener != null) listener.onMessageSent(true, null);
                 })
                 .addOnFailureListener(e -> {
-                    listener.onMessageSent(false, "Failed to get user info: " + e.getMessage());
+                    Log.e(TAG, "Error sending image", e);
+                    if (listener != null) listener.onMessageSent(false, e.getMessage());
                 });
     }
+    private void sendPushNotification(String chatId, String messageContent, String senderName, boolean isImage) {
+        String currentUserId = FirebaseAuth.getInstance().getCurrentUser().getUid();
+        getRecipientToken(chatId, currentUserId, (token, recipientId) -> {
+            if (token != null && !token.isEmpty()) {
+                String title = "New message from " + senderName;
+                String body = isImage ? "📷 Image" : messageContent;
+                if (!isImage && body.length() > 50) {
+                    body = body.substring(0, 50) + "...";
+                }
 
+                JSONObject data = new JSONObject();
+                try {
+                    data.put("chatId", chatId);
+                    data.put("senderId", currentUserId);
+                    data.put("senderName", senderName);
+                    data.put("type", isImage ? "image" : "text");
+                } catch (JSONException e) {
+                    Log.e(TAG, "Error creating JSON data", e);
+                }
 
-
-
+                NotificationServerHelper.sendNotification(token, title, body, data, null);
+            } else {
+                Log.d(TAG, "No FCM token for recipient: " + recipientId);
+            }
+        });
+    }
     // Update chat's last message
     private void updateChatLastMessage(String chatId, String messageType) {
         String lastMessagePlaceholder;
@@ -297,6 +248,49 @@ public class ChatRepository {
                 .update(updates)
                 .addOnFailureListener(e ->
                         Log.e(TAG, "Failed to update last message", e));
+    }
+
+    private void getRecipientToken(String chatId, String currentUserId, RecipientTokenCallback callback) {
+        db.collection("chats")
+                .document(chatId)
+                .get()
+                .addOnSuccessListener(documentSnapshot -> {
+                    if (documentSnapshot.exists()) {
+                        List<String> participants = (List<String>) documentSnapshot.get("participantIds");
+                        if (participants != null) {
+                            for (String id : participants) {
+                                if (!id.equals(currentUserId)) {
+                                    // Fetch that user's token
+                                    db.collection("users")
+                                            .document(id)
+                                            .get()
+                                            .addOnSuccessListener(userDoc -> {
+                                                if (userDoc.exists()) {
+                                                    String token = userDoc.getString("fcmToken");
+                                                    callback.onResult(token, id);
+                                                } else {
+                                                    callback.onResult(null, null);
+                                                }
+                                            })
+                                            .addOnFailureListener(e -> {
+                                                Log.e(TAG, "Error fetching user", e);
+                                                callback.onResult(null, null);
+                                            });
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                    callback.onResult(null, null);
+                })
+                .addOnFailureListener(e -> {
+                    Log.e(TAG, "Error fetching chat", e);
+                    callback.onResult(null, null);
+                });
+    }
+
+    interface RecipientTokenCallback {
+        void onResult(String token, String recipientId);
     }
 
     // Mark message as delivered
@@ -521,6 +515,7 @@ public class ChatRepository {
         void onChatsLoaded(List<Chat> chats, Map<String, User> userMap);
         void onError(String error);
     }
+
 
     public interface OnMessagesLoadedListener {
         void onMessagesLoaded(List<Message> messages);

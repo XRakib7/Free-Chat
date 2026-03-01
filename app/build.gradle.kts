@@ -38,6 +38,7 @@ android {
 }
 
 dependencies {
+    implementation("com.squareup.okhttp3:okhttp:5.3.2")
     // Source: https://mvnrepository.com/artifact/com.github.bumptech.glide/glide
     implementation("com.github.bumptech.glide:glide:5.0.5")
     // Source: https://mvnrepository.com/artifact/com.google.firebase/firebase-bom

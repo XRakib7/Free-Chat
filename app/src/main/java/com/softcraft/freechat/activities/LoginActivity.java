@@ -124,7 +124,7 @@ public class LoginActivity extends AppCompatActivity implements AuthManager.Auth
         buttonLogin.setEnabled(true);
 
         Toast.makeText(this, "Login successful!", Toast.LENGTH_SHORT).show();
-
+        NotificationHelper.updateFCMToken();
         // Go to main activity
         startActivity(new Intent(LoginActivity.this, MainActivity.class));
         finish();

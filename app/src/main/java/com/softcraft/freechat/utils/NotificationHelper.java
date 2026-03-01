@@ -20,11 +20,8 @@ public class NotificationHelper {
                         return;
                     }
 
-                    // Get new FCM registration token
                     String token = task.getResult();
                     Log.d(TAG, "FCM Token: " + token);
-
-                    // Save token to Firestore
                     saveTokenToFirestore(token);
                 });
     }
